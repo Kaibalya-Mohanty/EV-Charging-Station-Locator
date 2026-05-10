@@ -1,5 +1,7 @@
 from flask import Flask, render_template, request, session, redirect, url_for, flash, jsonify
+
 from knn_clustering import EVStationClusterer
+
 import pandas as pd
 import json
 import math
@@ -14,11 +16,14 @@ import requests as http_requests
 
 app = Flask(__name__)
 
-# 🔐 SECRET KEY — falls back to a dev key so the app never crashes on startup
+# ==============================
+# SECRET KEY
 # In production (Render), always set SECRET_KEY as an environment variable.
+# ==============================
 app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY") or "ev-finder-dev-fallback-key-change-in-prod"
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
 df = None
 ml_model = None
 clusterer = None
@@ -29,13 +34,22 @@ clusterer = None
 # ==============================
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 
-
 # ==============================
 # DATABASE CONNECTION
+# FIX: Guard against DATABASE_URL being None (e.g. when Render free DB expires)
 # ==============================
-
 def get_db_connection():
-    conn = psycopg2.connect(DATABASE_URL)
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL is not set. "
+            "Go to your Render dashboard and re-create the PostgreSQL database, "
+            "then link it to this service via the Environment tab."
+        )
+    # FIX: Render sometimes returns a postgres:// URI but psycopg2 needs postgresql://
+    url = DATABASE_URL
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    conn = psycopg2.connect(url)
     return conn
 
 
@@ -56,23 +70,25 @@ def init_db():
     conn.close()
 
 
-init_db()
-
+# FIX: Wrap init_db() so a missing/expired DB is logged but doesn't crash Gunicorn
+try:
+    init_db()
+    print("✅ Database initialised")
+except Exception as e:
+    print(f"⚠️  DB init failed: {e}")
+    print("   App will start, but all database features (login/register/admin) will be unavailable.")
+    print("   Re-create the PostgreSQL database on Render and redeploy to fix this.")
 
 # ==============================
 # LOAD CSV DATA
 # ==============================
-
 csv_file = "india_ev_charging_stations.csv"
 
 if os.path.exists(csv_file):
     try:
         df = pd.read_csv(csv_file)
-
-        # Clean column names
         df.columns = df.columns.str.strip()
 
-        # 🔧 FIX: Clean latitude and longitude values
         df['lattitude'] = (
             df['lattitude']
             .astype(str)
@@ -80,7 +96,6 @@ if os.path.exists(csv_file):
             .str.strip()
             .astype(float)
         )
-
         df['longitude'] = (
             df['longitude']
             .astype(str)
@@ -88,9 +103,7 @@ if os.path.exists(csv_file):
             .str.strip()
             .astype(float)
         )
-
         print(f"✅ Loaded {len(df)} EV Stations")
-
     except Exception as e:
         print("CSV Load Error:", e)
         df = pd.DataFrame()
@@ -98,32 +111,22 @@ else:
     print("❌ CSV file not found!")
     df = pd.DataFrame()
 
-
 # ==============================
 # MACHINE LEARNING MODEL
 # ==============================
-
 def train_demand_model():
     global ml_model
-
-    if df.empty:
+    if df is None or df.empty:
         return
-
     try:
         X = df[['lattitude', 'longitude']].dropna().values
-
-        # Density-based demand: more nearby stations = higher demand area
         rad = np.radians(X)
         tree = BallTree(rad, metric='haversine')
-        # Count stations within 10km (10/6371 in radians)
         counts = tree.query_radius(rad, r=10 / 6371, count_only=True)
         y = np.clip(counts * 12, 20, 200).astype(float)
-
         ml_model = RandomForestRegressor(n_estimators=50)
         ml_model.fit(X, y)
-
         print("✅ ML Demand Model Trained")
-
     except Exception as e:
         print("ML Training Error:", e)
 
@@ -134,18 +137,16 @@ train_demand_model()
 def predict_station_demand(lat, lon):
     if ml_model is None:
         return 0
-
     try:
         prediction = ml_model.predict([[lat, lon]])
         return int(prediction[0])
-    except:
+    except Exception:
         return 0
 
 
 # ==============================
 # KNN CLUSTERING MODEL
 # ==============================
-
 def init_clusterer():
     global clusterer
     if df is not None and not df.empty:
@@ -159,34 +160,35 @@ def init_clusterer():
 
 init_clusterer()
 
-
 # ==============================
 # DISTANCE CALCULATION
 # ==============================
-
 def calculate_distance(lat1, lon1, lat2, lon2):
-
     R = 6371
-
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-
     a = (
-        math.sin(dlat / 2) ** 2 +
-        math.cos(math.radians(lat1)) *
-        math.cos(math.radians(lat2)) *
-        math.sin(dlon / 2) ** 2
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2) ** 2
     )
-
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
     return R * c
+
+
+# ==============================
+# DB AVAILABILITY HELPER
+# Used to show a friendly error instead of a 500 when DB is down
+# ==============================
+def db_unavailable():
+    """Returns True if DATABASE_URL is missing — used to guard DB-dependent routes."""
+    return not DATABASE_URL
 
 
 # ==============================
 # LANDING PAGE
 # ==============================
-
 @app.route('/')
 def landing():
     return render_template("home.html")
@@ -195,36 +197,32 @@ def landing():
 # ==============================
 # REGISTER
 # ==============================
-
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    if db_unavailable():
+        flash("Database is currently unavailable. Please try again later.", "error")
+        return render_template("register.html")
 
     if request.method == 'POST':
-
         username = request.form['username'].strip()
         email = request.form['email'].strip()
         password = generate_password_hash(request.form['password'])
-
         try:
-
             conn = get_db_connection()
             cur = conn.cursor()
-
             cur.execute(
-                "INSERT INTO users (username,email,password) VALUES (%s,%s,%s)",
+                "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)",
                 (username, email, password)
             )
-
             conn.commit()
             cur.close()
             conn.close()
-
             flash("Account created successfully!", "success")
-
             return redirect(url_for('login'))
-
         except psycopg2.errors.UniqueViolation:
             flash("Username or Email already exists!", "error")
+        except Exception as e:
+            flash(f"Registration failed: {str(e)}", "error")
 
     return render_template("register.html")
 
@@ -232,36 +230,31 @@ def register():
 # ==============================
 # LOGIN
 # ==============================
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    if db_unavailable():
+        flash("Database is currently unavailable. Please try again later.", "error")
+        return render_template("login.html")
 
     if request.method == 'POST':
-
         username = request.form['username'].strip()
         password = request.form['password']
-
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-
-        cur.execute(
-            "SELECT * FROM users WHERE username=%s",
-            (username,)
-        )
-        user = cur.fetchone()
-
-        cur.close()
-        conn.close()
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+            user = cur.fetchone()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            flash(f"Database error: {str(e)}", "error")
+            return render_template("login.html")
 
         if user and check_password_hash(user['password'], password):
-
             session['user_id'] = user['id']
             session['username'] = user['username']
-
             flash("Welcome back!", "success")
-
             return redirect(url_for('dashboard'))
-
         else:
             flash("Invalid credentials!", "error")
 
@@ -271,172 +264,116 @@ def login():
 # ==============================
 # LOGOUT
 # ==============================
-
 @app.route('/logout')
 def logout():
-
     session.clear()
-
     flash("Logged out successfully!", "success")
-
     return redirect(url_for('landing'))
 
 
 # ==============================
 # DASHBOARD
 # ==============================
-
 @app.route('/dashboard')
 def dashboard():
-
     if 'user_id' not in session:
         return redirect(url_for('login'))
-
-    return render_template(
-        "index.html",
-        username=session['username']
-    )
+    return render_template("index.html", username=session['username'])
 
 
 # ==============================
 # EV SEARCH RESULT
 # ==============================
-
 @app.route('/result', methods=['POST'])
 def result():
-
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
     try:
-
         user_lat = float(request.form['latitude'])
         user_lon = float(request.form['longitude'])
         battery = float(request.form.get('battery_percent', 50))
-
         safe_battery = max(0, battery - 5)
-
         max_range = safe_battery * 2.5
 
         nearby_stations = []
 
         for _, row in df.iterrows():
-
             try:
-
                 s_lat = float(row['lattitude'])
                 s_lon = float(row['longitude'])
-
-                dist = calculate_distance(
-                    user_lat,
-                    user_lon,
-                    s_lat,
-                    s_lon
-                )
+                dist = calculate_distance(user_lat, user_lon, s_lat, s_lon)
 
                 if dist <= max_range:
-
                     demand = predict_station_demand(s_lat, s_lon)
-
                     nearby_stations.append({
-
                         "name": str(row.get('name', 'N/A')),
-
                         "lat": s_lat,
                         "lon": s_lon,
-
                         "distance": round(dist, 2),
-
                         "demand_score": demand,
-
                         "address": str(row.get('address', 'N/A')),
-
                         "city": str(row.get('city', 'N/A')),
-
                         "state": str(row.get('state', 'N/A')),
-
-                        # KNN cluster defaults (overwritten below if clusterer is ready)
                         "cluster_id": -1,
                         "cluster_color": "#888888"
-
                     })
-
-            except:
+            except Exception:
                 continue
 
-        # ── KNN: attach cluster zone info to each nearby station ──────────────
+        # KNN: attach cluster zone info to each nearby station
         if clusterer is not None and nearby_stations:
             try:
                 knn_results = clusterer.find_nearest(user_lat, user_lon, k=min(20, len(nearby_stations)))
-                # Build lookup by (lat, lon)
                 knn_lookup = {(r['lat'], r['lon']): r for r in knn_results}
                 for s in nearby_stations:
                     key = (s['lat'], s['lon'])
                     if key in knn_lookup:
-                        s['cluster_id']    = knn_lookup[key]['cluster_id']
+                        s['cluster_id'] = knn_lookup[key]['cluster_id']
                         s['cluster_color'] = knn_lookup[key]['cluster_color']
             except Exception as e:
                 print("KNN lookup error:", e)
 
-        # Smart ranking
-        nearby_stations.sort(
-            key=lambda x: (x['distance'], -x['demand_score'])
-        )
+        # Smart ranking: closer first, break ties by lower demand (quieter)
+        nearby_stations.sort(key=lambda x: (x['distance'], -x['demand_score']))
 
-        # Remove duplicate stations
+        # Deduplicate
         seen = set()
         unique_stations = []
-
         for s in nearby_stations:
             key = (round(s['lat'], 5), round(s['lon'], 5))
             if key not in seen:
                 seen.add(key)
                 unique_stations.append(s)
-
         nearby_stations = unique_stations
 
-        # User's cluster zone info
         user_cluster = None
         if clusterer is not None:
             try:
                 user_cluster = clusterer.predict_cluster(user_lat, user_lon)
-            except:
+            except Exception:
                 pass
 
-        # All stations for background cluster map display
         all_stations_json = json.dumps(
             clusterer.get_all_clustered() if clusterer is not None else []
         )
 
         return render_template(
-
             "result.html",
-
             stations=nearby_stations,
-
             stations_json=json.dumps(nearby_stations),
-
             count=len(nearby_stations),
-
             battery=int(battery),
-
             max_range=round(max_range, 1),
-
             username=session['username'],
-
             u_lat=user_lat,
             u_lon=user_lon,
-
             user_cluster=user_cluster,
-
             all_stations_json=all_stations_json
-
         )
 
     except Exception as e:
-
         flash(f"Error: {str(e)}", "error")
-
         return redirect(url_for('dashboard'))
 
 
@@ -444,30 +381,28 @@ def result():
 # KNN NEAREST STATIONS (JSON API)
 # GET /knn?lat=12.97&lon=77.59&k=5
 # ==============================
-
 @app.route('/knn')
 def knn_nearest():
-
     if 'user_id' not in session:
         return {"error": "Login required"}, 401
 
     try:
         lat = float(request.args.get('lat'))
         lon = float(request.args.get('lon'))
-        k   = min(int(request.args.get('k', 5)), 20)
+        k = min(int(request.args.get('k', 5)), 20)
     except (TypeError, ValueError):
         return {"error": "Invalid lat/lon parameters"}, 400
 
     if clusterer is None:
         return {"error": "Clustering model not initialised"}, 500
 
-    nearest      = clusterer.find_nearest(lat, lon, k=k)
+    nearest = clusterer.find_nearest(lat, lon, k=k)
     user_cluster = clusterer.predict_cluster(lat, lon)
 
     return {
         "user_cluster": user_cluster,
-        "nearest":      nearest,
-        "count":        len(nearest),
+        "nearest": nearest,
+        "count": len(nearest),
     }
 
 
@@ -475,10 +410,8 @@ def knn_nearest():
 # CLUSTER MAP PAGE
 # GET /cluster-map
 # ==============================
-
 @app.route('/cluster-map')
 def cluster_map():
-
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
@@ -487,56 +420,56 @@ def cluster_map():
         return redirect(url_for('dashboard'))
 
     stations_data = clusterer.get_all_clustered()
-    cluster_data  = clusterer.cluster_summary()
+    cluster_data = clusterer.cluster_summary()
 
     return render_template(
         "cluster_map.html",
-        username       = session['username'],
-        stations_json  = json.dumps(stations_data),
-        clusters_json  = json.dumps(cluster_data),
-        total_stations = len(stations_data),
-        total_clusters = len(cluster_data),
+        username=session['username'],
+        stations_json=json.dumps(stations_data),
+        clusters_json=json.dumps(cluster_data),
+        total_stations=len(stations_data),
+        total_clusters=len(cluster_data),
     )
 
 
 # ==============================
-# OPENCAGE API KEY
+# OPENCAGE AUTOCOMPLETE
+# GET /autocomplete?q=bhubaneswar
 # ==============================
-
 OPENCAGE_API_KEY = os.environ.get("OPENCAGE_API_KEY")
 
-
-# ==============================
-# AUTOCOMPLETE — OpenCage API
-# GET /autocomplete?q=bhubaneswar
-# Returns [{display_name, full_address, lat, lon}, ...]
-# ==============================
 
 @app.route('/autocomplete')
 def autocomplete():
     query = request.args.get('q', '').strip()
     if len(query) < 2:
         return jsonify([])
+
+    if not OPENCAGE_API_KEY:
+        return jsonify([])
+
     try:
         resp = http_requests.get(
             'https://api.opencagedata.com/geocode/v1/json',
             params={
-                'q':              query,
-                'key':            OPENCAGE_API_KEY,
-                'limit':          6,
-                'language':       'en',
-                'countrycode':    'in',
+                'q': query,
+                'key': OPENCAGE_API_KEY,
+                'limit': 6,
+                'language': 'en',
+                'countrycode': 'in',
                 'no_annotations': 1,
-                'no_record':      1,
+                'no_record': 1,
             },
             timeout=5
         )
         data = resp.json()
         results = []
+
         for item in data.get('results', []):
-            comp     = item.get('components', {})
+            comp = item.get('components', {})
             geometry = item.get('geometry', {})
             name_parts = []
+
             for field in ['neighbourhood', 'suburb', 'village', 'town',
                           'city', 'county', 'state_district', 'state']:
                 val = comp.get(field, '')
@@ -544,15 +477,19 @@ def autocomplete():
                     name_parts.append(val)
                 if len(name_parts) == 3:
                     break
-            short_name   = ', '.join(name_parts) if name_parts else item.get('formatted', '')
+
+            short_name = ', '.join(name_parts) if name_parts else item.get('formatted', '')
             full_address = item.get('formatted', short_name)
+
             results.append({
                 'display_name': short_name,
                 'full_address': full_address,
-                'lat':          geometry.get('lat', 0),
-                'lon':          geometry.get('lng', 0),
+                'lat': geometry.get('lat', 0),
+                'lon': geometry.get('lng', 0),
             })
+
         return jsonify(results)
+
     except Exception as e:
         print("Autocomplete error:", e)
         return jsonify([])
@@ -561,9 +498,7 @@ def autocomplete():
 # ==============================
 # ADMIN PANEL
 # GET /admin
-# Only accessible to the user whose username matches ADMIN_USERNAME
 # ==============================
-
 @app.route('/admin')
 def admin():
     if 'user_id' not in session:
@@ -573,38 +508,43 @@ def admin():
         flash("Access denied. Admins only.", "error")
         return redirect(url_for('dashboard'))
 
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute(
-        "SELECT id, username, email, created_at FROM users ORDER BY created_at DESC"
-    )
-    users = cur.fetchall()
-    cur.close()
-    conn.close()
+    if db_unavailable():
+        flash("Database is currently unavailable.", "error")
+        return redirect(url_for('dashboard'))
 
-    total_users    = len(users)
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT id, username, email, created_at FROM users ORDER BY created_at DESC")
+        users = cur.fetchall()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        flash(f"Database error: {str(e)}", "error")
+        return redirect(url_for('dashboard'))
+
+    total_users = len(users)
     total_stations = len(df) if df is not None and not df.empty else 0
 
-    # Build station list from CSV (first 200 rows to keep page fast)
     stations = []
     if df is not None and not df.empty:
         for _, row in df.head(200).iterrows():
             stations.append({
-                "name":      row.get('name', 'N/A'),
-                "city":      row.get('city', 'N/A'),
-                "state":     row.get('state', 'N/A'),
+                "name": row.get('name', 'N/A'),
+                "city": row.get('city', 'N/A'),
+                "state": row.get('state', 'N/A'),
                 "lattitude": row.get('lattitude', ''),
                 "longitude": row.get('longitude', ''),
-                "type":      row.get('type', 'N/A'),
+                "type": row.get('type', 'N/A'),
             })
 
     return render_template(
         "admin.html",
-        users          = users,
-        stations       = stations,
-        total_users    = total_users,
-        total_stations = total_stations,
-        username       = session['username'],
+        users=users,
+        stations=stations,
+        total_users=total_users,
+        total_stations=total_stations,
+        username=session['username'],
     )
 
 
@@ -612,7 +552,6 @@ def admin():
 # ADMIN — DELETE USER
 # POST /admin/delete/<id>
 # ==============================
-
 @app.route('/admin/delete/<int:user_id>', methods=['POST'])
 def admin_delete_user(user_id):
     if 'user_id' not in session:
@@ -622,26 +561,31 @@ def admin_delete_user(user_id):
         flash("Access denied.", "error")
         return redirect(url_for('dashboard'))
 
-    # Prevent admin from deleting their own account
     if user_id == session['user_id']:
         flash("You cannot delete your own admin account.", "error")
         return redirect(url_for('admin'))
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
+    if db_unavailable():
+        flash("Database is currently unavailable.", "error")
+        return redirect(url_for('admin'))
 
-    flash(f"User #{user_id} deleted successfully.", "success")
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        flash(f"User #{user_id} deleted successfully.", "success")
+    except Exception as e:
+        flash(f"Delete failed: {str(e)}", "error")
+
     return redirect(url_for('admin'))
 
 
 # ==============================
 # RUN APP
 # ==============================
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
