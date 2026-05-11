@@ -847,52 +847,51 @@
             <div class="station-card"
                 style="border-left-color:{{ s.cluster_color if s.cluster_color != '#888888' else 'var(--green)' }};">
 
-                {% if loop.index <= 3 %} <div class="ai-badge">🏆 AI Recommended</div>
-            {% endif %}
-
-            {% if s.cluster_id != -1 %}
-            <div class="zone-tag" style="background:{{ s.cluster_color }};">Zone #{{ s.cluster_id }}</div>
-            {% endif %}
-
-            <h3>{{ s.name }}</h3>
-            <p class="address">{{ s.address }}{% if s.city and s.city != 'N/A' %}, {{ s.city }}{% endif %}{% if s.state
-                and s.state != 'N/A' %}, {{ s.state }}{% endif %}</p>
-
-            <div class="meta-row">
-                <span class="dist-badge">📍 {{ s.distance }} km away</span>
-                {% if s.demand_score > 120 %}
-                <span class="demand-chip demand-high">🔥 High Demand</span>
-                {% elif s.demand_score > 70 %}
-                <span class="demand-chip demand-med">⚡ Medium Demand</span>
-                {% else %}
-                <span class="demand-chip demand-low">✅ Low Demand</span>
+                {% if loop.index <= 3 %}
+                <div class="ai-badge">🏆 AI Recommended</div>
                 {% endif %}
+
+                {% if s.cluster_id != -1 %}
+                <div class="zone-tag" style="background:{{ s.cluster_color }};">Zone #{{ s.cluster_id }}</div>
+                {% endif %}
+
+                <h3>{{ s.name }}</h3>
+                <p class="address">{{ s.address }}{% if s.city and s.city != 'N/A' %}, {{ s.city }}{% endif %}{% if s.state and s.state != 'N/A' %}, {{ s.state }}{% endif %}</p>
+
+                <div class="meta-row">
+                    <span class="dist-badge">📍 {{ s.distance }} km away</span>
+                    {% if s.demand_score > 120 %}
+                    <span class="demand-chip demand-high">🔥 High Demand</span>
+                    {% elif s.demand_score > 70 %}
+                    <span class="demand-chip demand-med">⚡ Medium Demand</span>
+                    {% else %}
+                    <span class="demand-chip demand-low">✅ Low Demand</span>
+                    {% endif %}
+                </div>
+
+                <p style="font-size:12px;color:var(--muted);">AI Demand Score: <b style="color:var(--text);">{{ s.demand_score }}</b></p>
+
+                <a href="https://www.google.com/maps/dir/?api=1&destination={{ s.lat }},{{ s.lon }}" target="_blank"
+                    class="btn-nav">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+                        <circle cx="12" cy="9" r="2.5" />
+                    </svg>
+                    Navigate Now
+                </a>
             </div>
-
-            <p style="font-size:12px;color:var(--muted);">AI Demand Score: <b style="color:var(--text);">{{
-                    s.demand_score }}</b></p>
-
-            <a href="https://www.google.com/maps/dir/?api=1&destination={{ s.lat }},{{ s.lon }}" target="_blank"
-                class="btn-nav">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-                    stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-                    <circle cx="12" cy="9" r="2.5" />
-                </svg>
-                Navigate Now
-            </a>
+            {% endfor %}
+            {% else %}
+            <div class="empty-state">
+                <div class="emoji">🔋</div>
+                <h3>No stations in range</h3>
+                <p>Try increasing your battery level or check back when you have more charge.</p>
+            </div>
+            {% endif %}
         </div>
-        {% endfor %}
-        {% else %}
-        <div class="empty-state">
-            <div class="emoji">🔋</div>
-            <h3>No stations in range</h3>
-            <p>Try increasing your battery level or check back when you have more charge.</p>
-        </div>
-        {% endif %}
-    </div>
 
-    <a href="/dashboard" class="back-link">← Change Location or Battery</a>
+        <a href="/dashboard" class="back-link">← Change Location or Battery</a>
 
     </div>
 
@@ -905,7 +904,8 @@
         const previewPins = {};
 
         // ── MAP ───────────────────────────────────────────────────────────────────────
-        const map = L.map('map', { zoomControl: true }).setView([{{ u_lat }}, { { u_lon } }], 11);
+        // FIX: was { { u_lon } } (broken Jinja2) — corrected to {{ u_lon }}
+        const map = L.map('map', { zoomControl: true }).setView([{{ u_lat }}, {{ u_lon }}], 11);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
@@ -923,7 +923,7 @@
         L.circle([{{ u_lat }}, {{ u_lon }}], {
             radius: {{ max_range }} * 1000,
             color: '#00e5a0', fillColor: '#00e5a0', fillOpacity: 0.06, weight: 1.5, dashArray: '6,4'
-}).addTo(map);
+        }).addTo(map);
 
         // Outside-range dots
         const nearbySet = new Set();
@@ -958,7 +958,7 @@
         L.circleMarker([{{ s.lat }}, {{ s.lon }}], {
             radius: 10, fillColor: getDemandColor({{ s.demand_score }}),
             color: "#080e12", weight: 2.5, fillOpacity: 1
-}).addTo(map).bindPopup(
+        }).addTo(map).bindPopup(
                 "<b>{{ s.name }}</b><br>{{ s.city }}, {{ s.state }}<br>" +
                 "<b style='color:#60a5fa'>{{ s.distance }} km</b> away<br>" +
                 getDemandLabel({{ s.demand_score }}) + "<br>" +
@@ -971,11 +971,10 @@
         {% endfor %}
 
         map.fitBounds(
-            L.circle([{{ u_lat }}, {{ u_lon }}], { radius: {{ max_range }}* 1000 }).getBounds()
+            L.circle([{{ u_lat }}, {{ u_lon }}], { radius: {{ max_range }} * 1000 }).getBounds()
         );
 
         // ── OSRM HELPERS ─────────────────────────────────────────────────────────────
-        // Multiple OSRM endpoints tried in order — public demo is often rate-limited
         const OSRM_BASES = [
             'https://router.project-osrm.org',
             'https://routing.openstreetmap.de/routed-car',
@@ -986,7 +985,6 @@
                 const ctrl = new AbortController();
                 const tid = setTimeout(() => ctrl.abort(), 8000);
                 try {
-                    // OSRM expects [lon,lat] in the URL
                     const url = `${base}/route/v1/driving/${srcLon},${srcLat};${dstLon},${dstLat}?overview=full&geometries=geojson`;
                     const r = await fetch(url, { signal: ctrl.signal });
                     clearTimeout(tid);
@@ -998,7 +996,7 @@
                     console.warn(`OSRM failed at ${base}:`, e.message);
                 }
             }
-            return null;   // all endpoints failed → caller uses straight-line fallback
+            return null;
         }
 
         // ── PREVIEW PINS ──────────────────────────────────────────────────────────────
@@ -1130,13 +1128,11 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         }
 
-        // routeCoords from OSRM GeoJSON are [lon, lat] pairs — unpack carefully
         function distPointToRoute(pLat, pLon, routeCoords) {
             let minDist = Infinity;
             for (let i = 0; i < routeCoords.length - 1; i++) {
                 const [aLon, aLat] = routeCoords[i];
                 const [bLon, bLat] = routeCoords[i + 1];
-                // Project point onto segment in lon/lat space (good enough at city scale)
                 const dx = bLon - aLon, dy = bLat - aLat;
                 const lenSq = dx * dx + dy * dy + 1e-12;
                 const t = Math.max(0, Math.min(1,
@@ -1165,7 +1161,7 @@
         }
 
         // ── GET ROUTE ─────────────────────────────────────────────────────────────────
-        let routeRunning = false;   // guard against double-clicks
+        let routeRunning = false;
 
         async function getRoute() {
             if (routeRunning) return;
@@ -1199,40 +1195,34 @@
 
                 let routeCoords, totalKm, totalMins = null;
 
-                // src = [lat, lon], dst = [lat, lon]
                 const osrmRoute = await fetchOSRM(src[0], src[1], dst[0], dst[1]);
 
                 if (osrmRoute) {
-                    // GeoJSON coordinates are [lon, lat]
                     routeCoords = osrmRoute.geometry.coordinates;
                     totalKm = (osrmRoute.distance / 1000).toFixed(1);
                     totalMins = Math.round(osrmRoute.duration / 60);
                 } else {
-                    // Straight-line fallback — coords stored as [lon, lat] to match OSRM format
                     console.warn('All OSRM endpoints failed — using straight-line fallback');
                     const steps = 60;
                     routeCoords = [];
                     for (let i = 0; i <= steps; i++) {
                         const t = i / steps;
                         routeCoords.push([
-                            src[1] + t * (dst[1] - src[1]),   // lon
-                            src[0] + t * (dst[0] - src[0])    // lat
+                            src[1] + t * (dst[1] - src[1]),
+                            src[0] + t * (dst[0] - src[0])
                         ]);
                     }
                     totalKm = haversine(src[0], src[1], dst[0], dst[1]).toFixed(1);
                 }
 
-                // Clear old layers
                 if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
                 routeMarkers.forEach(m => map.removeLayer(m)); routeMarkers = [];
 
-                // Draw route — Leaflet L.geoJSON expects [lon, lat] (GeoJSON standard) ✓
                 routeLayer = L.geoJSON(
                     { type: 'Feature', geometry: { type: 'LineString', coordinates: routeCoords } },
                     { style: { color: '#60a5fa', weight: 5, opacity: 0.9 } }
                 ).addTo(map);
 
-                // Start / end markers
                 const srcM = L.circleMarker([src[0], src[1]], {
                     radius: 9, fillColor: '#00e5a0', color: '#080e12', weight: 2.5, fillOpacity: 1, zIndexOffset: 1000
                 }).addTo(map).bindPopup(`<b>📍 ${srcEl.value.split(',')[0]}</b><br>Start`);
@@ -1245,15 +1235,12 @@
 
                 box.innerHTML = '📍 Finding stations along route...';
 
-                // Find stations within corridor distance of the route
                 const along = [];
                 ALL_STATIONS.forEach(s => {
-                    // s.lat / s.lon are plain numbers from Python
                     const d = distPointToRoute(s.lat, s.lon, routeCoords);
                     if (d <= corKm) along.push({ ...s, distToRoute: d.toFixed(1) });
                 });
 
-                // Sort by travel order (distance from source)
                 along.sort((a, b) =>
                     haversine(src[0], src[1], a.lat, a.lon) -
                     haversine(src[0], src[1], b.lat, b.lon)
@@ -1271,7 +1258,6 @@
                     routeMarkers.push(m);
                 });
 
-                // Success banner
                 box.style.background = 'rgba(0,229,160,0.06)';
                 box.style.borderColor = 'rgba(0,229,160,0.2)';
                 box.style.color = '#00e5a0';
