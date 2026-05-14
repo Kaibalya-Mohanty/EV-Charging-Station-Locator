@@ -365,6 +365,10 @@
 
     <div class="grain"></div>
 
+    <div class="energy-line"></div>
+    <div class="energy-line"></div>
+    <div class="energy-line"></div>
+
     <nav>
         <h1>EV GRID</h1>
 
@@ -408,6 +412,16 @@
                     <h3>24/7</h3>
                     <p>Continuous route intelligence and EV network monitoring for uninterrupted travel.</p>
                 </div>
+            </div>
+        </div>
+        <div class="highway">
+            <div class="road"></div>
+
+            <div class="truck">
+                <div class="truck-body"></div>
+                <div class="truck-cabin"></div>
+                <div class="wheel left"></div>
+                <div class="wheel right"></div>
             </div>
         </div>
     </section>
@@ -508,6 +522,143 @@
         <div>EV Charge Grid © 2026</div>
         <div>Built for intelligent electric mobility systems.</div>
     </footer>
+
+    <style>
+        .highway {
+            position: absolute;
+            bottom: 80px;
+            left: 0;
+            width: 100%;
+            height: 120px;
+            overflow: hidden;
+            opacity: 0.9;
+            pointer-events: none;
+        }
+
+        .road {
+            position: absolute;
+            width: 200%;
+            height: 4px;
+            background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.25), transparent);
+            top: 50%;
+            animation: roadMove 8s linear infinite;
+        }
+
+        .truck {
+            position: absolute;
+            bottom: 20px;
+            left: -250px;
+            width: 220px;
+            height: 70px;
+            animation: truckDrive 14s linear infinite;
+        }
+
+        .truck-body {
+            position: absolute;
+            width: 150px;
+            height: 45px;
+            background: linear-gradient(to right, #d9d9d9, #ffffff);
+            border-radius: 10px;
+            bottom: 12px;
+            left: 0;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.15);
+        }
+
+        .truck-cabin {
+            position: absolute;
+            width: 55px;
+            height: 35px;
+            background: linear-gradient(to right, #cfcfcf, #ffffff);
+            right: 0;
+            bottom: 22px;
+            border-radius: 8px;
+        }
+
+        .wheel {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            background: #111;
+            border: 4px solid #888;
+            border-radius: 50%;
+            bottom: 0;
+            animation: wheelSpin 1s linear infinite;
+        }
+
+        .wheel.left {
+            left: 30px;
+        }
+
+        .wheel.right {
+            right: 20px;
+        }
+
+        .energy-line {
+            position: absolute;
+            width: 2px;
+            height: 100vh;
+            background: linear-gradient(to bottom, transparent, rgba(0, 255, 170, 0.35), transparent);
+            animation: pulseLine 4s ease-in-out infinite;
+        }
+
+        .energy-line:nth-child(1) {
+            left: 15%;
+        }
+
+        .energy-line:nth-child(2) {
+            left: 50%;
+            animation-delay: 1s;
+        }
+
+        .energy-line:nth-child(3) {
+            left: 82%;
+            animation-delay: 2s;
+        }
+
+        @keyframes truckDrive {
+            0% {
+                transform: translateX(0);
+            }
+
+            100% {
+                transform: translateX(calc(100vw + 400px));
+            }
+        }
+
+        @keyframes wheelSpin {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes roadMove {
+            from {
+                transform: translateX(0);
+            }
+
+            to {
+                transform: translateX(-50%);
+            }
+        }
+
+        @keyframes pulseLine {
+
+            0%,
+            100% {
+                opacity: 0.2;
+                transform: scaleY(0.9);
+            }
+
+            50% {
+                opacity: 0.9;
+                transform: scaleY(1.1);
+            }
+        }
+    </style>
 
     <script>
         const reveals = document.querySelectorAll('.reveal');
