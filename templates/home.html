@@ -370,6 +370,7 @@
     <div class="energy-line"></div>
 
     <nav>
+        <!-- Flask-integrated cinematic homepage -->
         <h1>EV GRID</h1>
 
         <ul>
@@ -393,8 +394,8 @@
             </p>
 
             <div class="hero-buttons">
-                <a href="#features" class="btn-primary">Explore Platform</a>
-                <a href="#network" class="btn-secondary">View Network</a>
+                <a href="{{ url_for('dashboard') }}" class="btn-primary">Launch Dashboard</a>
+                <a href="{{ url_for('login') }}" class="btn-secondary">Login Access</a>
             </div>
 
             <div class="stats">
@@ -512,8 +513,8 @@
             </p>
 
             <div class="hero-buttons" style="justify-content:center;">
-                <a href="#" class="btn-primary">Launch Platform</a>
-                <a href="#" class="btn-secondary">GitHub Repository</a>
+                <a href="{{ url_for('register') }}" class="btn-primary">Create Account</a>
+                <a href="{{ url_for('dashboard') }}" class="btn-secondary">Open EV Map</a>
             </div>
         </div>
     </section>
